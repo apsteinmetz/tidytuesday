@@ -169,7 +169,8 @@ deaths<-deaths %>% mutate(General_Cause=`Cause of death`)
 
 deaths<-deaths %>% 
   mutate_cond(str_detect(tolower(`Cause of death`),
-                         "accident|fall|hit|crash|fire|poison"),General_Cause="Accident")
+                         "accident|fall|hit|crash|fire|poison"),
+              General_Cause="Accident")
 deaths<-deaths %>% 
   mutate_cond(str_detect(tolower(`Cause of death`),
                          "drug|overdose|alcohol"),General_Cause="Drugs")
@@ -271,10 +272,43 @@ deaths_loc %>% group_by(country) %>%
 This gives us a decent picture of how rock stars die.  Mostly from the same things that kill all of us. Heart disease and cancer were the leading causes of death in US in 2015, followed by lung disease and accidents.
 
 ```{r}
-#conform names of causes to those in our rock star data
+#assume you've saved the spreadsheet in a folder called "data"
+library(readxl)
+global_mortality <- read_excel("data/global_mortality.xlsx")
+
+#Clean up column names.
 names(global_mortality)<-names(global_mortality) %>% 
   str_replace_all(" \\(%\\)","")
-global_mortality %>% filter(country_code=="USA")
+
+#This data set isn't strictly "tidy.""  Fix by putting
+# all causes into one column
+global_mortality <- global_mortality %>%
+  gather(cause,proportion,-country,-country_code,-year)
+global_mortality<-mutate(global_mortality,year=as.integer(year))
+```
+#Conform names of global death causes to those in our rock star data
+I did this the first time through only.  It requires manual editing of a table.
+```{r}
+#conform names of causes to those in our rock star data
+cause_map<-select(global_mortality,cause) %>%
+  distinct %>%
+  mutate(General_Cause="Other")
+#pick a general cause from the list below
+deaths$General_Cause %>% unique()
+#edit to make general causes aligned
+cause_map<-edit(cause_map)
+save(cause_map,file="data/cause_map.rdata")
+```
+
+```{r}
+load("~/R/tidytuesday/data/cause_map.rdata")
+global_mortality<-left_join(global_mortality,cause_map)
+mortality_summary<-global_mortality %>% group_by(country,country_code,year,General_Cause) %>%
+  summarise(proportion=sum(proportion))
+
+mortality_summary %>% group_by(year,General_Cause) %>%
+  summarise(proportion=mean(proportion)) %>% 
+  ggplot(aes(x=year,y=proportion,color=General_Cause))+geom_line()
 ```
 
 # You can't make this stuff up
@@ -285,16 +319,18 @@ There are some interesting causes in this Wikipedia tables.  Three electrocution
 While the big killers are the same for both populations, is there evidence that rockers "live fast?"  Yes, it turns out.
 
 ```{r, message=FALSE, warning=FALSE}
+us_deaths<-mortality_summary %>% 
+  filter(country_code=="USA") %>% 
+  group_by(General_Cause) %>% 
+  summarise(US=sum(proportion)/100)
 
-# we assume the CDC calls drug overdoses an accident so we will too.
 comp_deaths<-cause_table %>% 
-  mutate_cond(General_Cause=="Drugs",General_Cause="Accident") %>% 
   group_by(General_Cause) %>% 
   summarise(Rockers=sum(Rockers)) %>% 
   right_join(us_deaths) %>%
   mutate(General_Cause=as_factor(General_Cause)) %>% 
   na.omit() %>% 
-  mutate(Rockers=Rockers/sum(Rockers),US=US/sum(US)) %>% 
+  mutate(Rockers=Rockers/sum(Rockers),US=proportion/100) %>% 
   {.}
   
 
