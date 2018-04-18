@@ -136,14 +136,15 @@ deaths<-deaths %>%
 deaths<-deaths %>% mutate(`Cause of death`=str_replace(`Cause of death`,"\\[[0-9,]+\\]",""))
 deaths<-deaths %>% mutate_cond(is.na(`Cause of death`),`Cause of death`="Not Specified")
 deaths<-deaths %>% mutate_cond(`Cause of death`=="",`Cause of death`="Not Specified")
+deaths<-deaths %>% mutate(Year=year(Date))
+
 deaths[1:5,]%>% kable(format.args=list(big.mark=","))
+
 ```
 #Submitting to Wikipedia is getting more popular.
 Now we have a clean table.  Before going further we should note that death entries are growing over time.  No great surprises here but this says something about the age of Wikipedia, the growing popularity of Wikipedia and the age of Rock and Roll.  It does not say anything about the business getting more risky.
 
 ```{r}
-deaths<-deaths %>% mutate(Year=year(Date))
-
 deaths %>%  
   group_by(Year) %>% 
   summarise(Entries=n()) %>%
@@ -238,8 +239,7 @@ deaths<-deaths %>% mutate_cond(!(General_Cause %in% cause_table$General_Cause[1:
 deaths<-deaths %>% mutate_cond(General_Cause =="Natural causes",General_Cause="Other")
 
 #We've done all the messing with deaths we need to do so lets save it for later.
-save(deaths,file='deaths.rdata')
-
+save(deaths,file="data/rock_deaths.rdata")
 
 gg<-cause_table[1:12,]  %>% 
   ggplot(aes(General_Cause,Rockers))+geom_col()
@@ -268,6 +268,7 @@ deaths_loc %>% group_by(country) %>%
   arrange(desc(count))
 ```
 
+
 #Get Global Mortality for #tidytuesday.
 This gives us a decent picture of how rock stars die.  Mostly from the same things that kill all of us. Heart disease and cancer were the leading causes of death in US in 2015, followed by lung disease and accidents.
 
@@ -289,15 +290,15 @@ global_mortality<-mutate(global_mortality,year=as.integer(year))
 #Conform names of global death causes to those in our rock star data
 I did this the first time through only.  It requires manual editing of a table.
 ```{r}
-#conform names of causes to those in our rock star data
-cause_map<-select(global_mortality,cause) %>%
-  distinct %>%
-  mutate(General_Cause="Other")
-#pick a general cause from the list below
-deaths$General_Cause %>% unique()
-#edit to make general causes aligned
-cause_map<-edit(cause_map)
-save(cause_map,file="data/cause_map.rdata")
+# #conform names of causes to those in our rock star data
+# cause_map<-select(global_mortality,cause) %>%
+#   distinct %>%
+#   mutate(General_Cause="Other")
+# #pick a general cause from the list below
+# deaths$General_Cause %>% unique()
+# #edit to make general causes aligned
+# cause_map<-edit(cause_map)
+# save(cause_map,file="data/cause_map.rdata")
 ```
 
 ```{r}
@@ -318,11 +319,14 @@ There are some interesting causes in this Wikipedia tables.  Three electrocution
 #Live fast?
 While the big killers are the same for both populations, is there evidence that rockers "live fast?"  Yes, it turns out.
 
+Since the vast majority of rockers in the Wikipedia database are from the US, let's narrow the global mortality set to the US alone, then join the two sets of causes.
+
 ```{r, message=FALSE, warning=FALSE}
 us_deaths<-mortality_summary %>% 
   filter(country_code=="USA") %>% 
   group_by(General_Cause) %>% 
-  summarise(US=sum(proportion)/100)
+  summarise(US=mean(proportion,na.rm=TRUE)/100) %>% 
+  {.}
 
 comp_deaths<-cause_table %>% 
   group_by(General_Cause) %>% 
@@ -330,7 +334,7 @@ comp_deaths<-cause_table %>%
   right_join(us_deaths) %>%
   mutate(General_Cause=as_factor(General_Cause)) %>% 
   na.omit() %>% 
-  mutate(Rockers=Rockers/sum(Rockers),US=proportion/100) %>% 
+  mutate(Rockers=Rockers/sum(Rockers)) %>% 
   {.}
   
 
