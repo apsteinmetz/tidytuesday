@@ -272,20 +272,23 @@ deaths_loc %>% group_by(country) %>%
 #Get Global Mortality for #tidytuesday.
 This gives us a decent picture of how rock stars die.  Mostly from the same things that kill all of us. Heart disease and cancer were the leading causes of death in US in 2015, followed by lung disease and accidents.
 
+I did this the first time through only.  It requires reading an excel file.  Subsequent runs should use the `.rdata` file we create.
+
 ```{r}
 #assume you've saved the spreadsheet in a folder called "data"
-library(readxl)
-global_mortality <- read_excel("data/global_mortality.xlsx")
-
-#Clean up column names.
-names(global_mortality)<-names(global_mortality) %>% 
-  str_replace_all(" \\(%\\)","")
-
-#This data set isn't strictly "tidy.""  Fix by putting
-# all causes into one column
-global_mortality <- global_mortality %>%
-  gather(cause,proportion,-country,-country_code,-year)
-global_mortality<-mutate(global_mortality,year=as.integer(year))
+# library(readxl)
+# global_mortality <- read_excel("data/global_mortality.xlsx")
+# 
+# #Clean up column names.
+# names(global_mortality)<-names(global_mortality) %>% 
+#   str_replace_all(" \\(%\\)","")
+# 
+# #This data set isn't strictly "tidy.""  Fix by putting
+# # all causes into one column
+# global_mortality <- global_mortality %>%
+#   gather(cause,proportion,-country,-country_code,-year)
+# global_mortality<-mutate(global_mortality,year=as.integer(year))
+#save(global_mortality,file="data/global_mortality.rdata")
 ```
 #Conform names of global death causes to those in our rock star data
 I did this the first time through only.  It requires manual editing of a table.
@@ -303,13 +306,24 @@ I did this the first time through only.  It requires manual editing of a table.
 
 ```{r}
 load("~/R/tidytuesday/data/cause_map.rdata")
+load("~/R/tidytuesday/data/global_mortality.rdata")
 global_mortality<-left_join(global_mortality,cause_map)
 mortality_summary<-global_mortality %>% group_by(country,country_code,year,General_Cause) %>%
-  summarise(proportion=sum(proportion))
+  summarise(proportion=sum(proportion,na.rm=TRUE))
 
-mortality_summary %>% group_by(year,General_Cause) %>%
-  summarise(proportion=mean(proportion)) %>% 
-  ggplot(aes(x=year,y=proportion,color=General_Cause))+geom_line()
+
+gg<-mortality_summary %>% group_by(year,General_Cause) %>%
+  summarise(proportion=mean(proportion,na.rm=TRUE)/100) %>% 
+  filter(General_Cause != "Not Specified") %>% 
+  ggplot(aes(year,proportion))+
+  geom_line()+facet_wrap(~General_Cause,scale="free")
+gg<-gg+labs(title="Top Causes of Global Deaths (All Countries)",
+            y="Relative Frequency")
+gg<-gg+scale_y_continuous(labels=scales::percent)
+gg<-gg+theme(panel.background = element_blank(),
+             panel.grid.major.x = element_line(color="black"))
+gg
+
 ```
 
 # You can't make this stuff up
