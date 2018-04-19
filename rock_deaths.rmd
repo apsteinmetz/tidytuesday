@@ -311,6 +311,22 @@ global_mortality<-left_join(global_mortality,cause_map)
 mortality_summary<-global_mortality %>% group_by(country,country_code,year,General_Cause) %>%
   summarise(proportion=sum(proportion,na.rm=TRUE))
 
+#make general_cause a factor ordered by global proportion all years
+mortality_summary$General_Cause<-
+  factor(mortality_summary$General_Cause,
+         levels=mortality_summary %>% 
+           group_by(General_Cause) %>%
+           summarise(proportion=mean(proportion,na.rm=TRUE)/100) %>%
+           arrange(proportion) %>% 
+           select(General_Cause) %>% 
+           pull()
+  )
+
+gg<-mortality_summary %>% group_by(year,General_Cause) %>%
+  summarise(proportion=mean(proportion,na.rm=TRUE)/100) %>% 
+  filter(General_Cause != "Not Specified") %>% 
+  ggplot(aes(year,proportion,fill=General_Cause))+
+  geom_col(color="black")
 
 gg<-mortality_summary %>% group_by(year,General_Cause) %>%
   summarise(proportion=mean(proportion,na.rm=TRUE)/100) %>% 
