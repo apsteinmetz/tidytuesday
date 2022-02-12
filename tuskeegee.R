@@ -2,15 +2,13 @@
 library(tidyverse)
 library(rvest)
 
-# I needed this for extra fonts on my windows system.  "Bahnschrift"
+# I needed this for extra fonts on my windows system.  "Chakra Petch"
 # is similar to the W.E.B DuBois fonts
 # run once
 # remotes::install_version("Rttf2pt1", version = "1.3.8")
 library(extrafont)
 # run once
-# font_import()
-
-loadfonts(device = "win")
+# loadfonts(device = "win")
 
 # get tuskegee files
 airmen <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-02-08/airmen.csv")
@@ -23,22 +21,22 @@ airmen <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesda
 # might be wrong. Use this just for indicative purposes.
 # Still, this is a great exercise is creative data wrangling!
 
-# build a list of spreadsheets to download
-page = rvest::read_html("https://web.archive.org/web/20120812191959/http://www.census.gov/population/www/documentation/twps0076/twps0076.html")
-url_root <- "https://web.archive.org/web/20121018075158if_/http://www.census.gov/population/www/documentation/twps0076/"
-
-#scrape xls urls from wayback machine
-urls <- page %>% html_elements("a") %>% 
-  html_attr("href") %>% 
-  enframe(name=NULL,value="file") %>% 
-  filter(str_detect(file,".xls")) %>% 
-  mutate(url = paste0(url_root,file)) %>% 
-  mutate(dest = paste0("data/airmen/",file))
+# # build a list of spreadsheets to download
+# page = rvest::read_html("https://web.archive.org/web/20120812191959/http://www.census.gov/population/www/documentation/twps0076/twps0076.html")
+# url_root <- "https://web.archive.org/web/20121018075158if_/http://www.census.gov/population/www/documentation/twps0076/"
+# 
+# #scrape xls urls from wayback machine
+# urls <- page %>% html_elements("a") %>% 
+#   html_attr("href") %>% 
+#   enframe(name=NULL,value="file") %>% 
+#   filter(str_detect(file,".xls")) %>% 
+#   mutate(url = paste0(url_root,file)) %>% 
+#   mutate(dest = paste0("data/airmen/",file))
 
 # download spreadsheets from wayback machine
-for (n in 2:nrow(urls)){
-  download.file(urls$url[n],urls$dest[n],mode = "wb")
-}
+# for (n in 2:nrow(urls)){
+#   download.file(urls$url[n],urls$dest[n],mode = "wb")
+#}
 
 # function load spreadsheets and extract usable data
 get_table <- function(n){
@@ -84,7 +82,7 @@ pop_adjusted <- airmen %>%
   mutate(per_1000_all = round(airmen/total * 1000,3)) %>% 
   mutate(region = ifelse(state %in% the_south,"South","North"))
   
-font_fam <- "Bahnschrift"
+font_fam <- "Chakra Petch SemiBold"
 pop_adjusted %>% 
   filter(black > 10000) %>% 
   mutate(state = fct_reorder(state, per_1000_blacks)) %>%
@@ -104,8 +102,12 @@ pop_adjusted %>%
     plot.caption.position = "plot",
     #axes
     axis.title.x = element_text(family=font_fam, hjust=0.5, size=12),
+    axis.title.y = element_text(family=font_fam, hjust=0.5, size=12),
     axis.text.x = element_text(family=font_fam, hjust=0.5, size=10),
     axis.text.y = element_text(family=font_fam, hjust=0.5, size=10),
+    #legend
+    legend.title = element_text(family=font_fam, hjust=0.5, size=10),
+    legend.text = element_text(family=font_fam, hjust=0.5, size=10),
     #background
     panel.background = element_rect(fill="#ffdea8", color=NA),
     panel.grid = element_blank(),
