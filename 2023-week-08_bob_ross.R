@@ -1,3 +1,6 @@
+# Tidy Tuesday 2023 Week 08
+# Art Steinmetz
+
 library(magick)
 library(cluster)
 library(stats)
@@ -6,6 +9,7 @@ library(tidyverse)
 library(ggfortify)
 library(ggpubr)
 library(tidytuesdayR)
+library(progress)
 
 
 # Get the Data
@@ -32,23 +36,28 @@ library(tidytuesdayR)
 bob_ross <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-21/bob_ross.csv')
 
 # download the paintings
-# for (img_index in 1:nrow(bob_ross)) {
-#   print(bob_ross$img_src[img_index])
-#   url <- bob_ross$img_src[img_index]
-#   
-#   # Define the local file name for the downloaded file
-#   local_file <- paste0("img/bob_ross/",bob_ross$painting_index[img_index],".png")
-#   
-#   # Download the file using download.file()
-#   download.file(url, local_file, mode = "wb")
-# }  
+# This is gonna take some time
+pb <- progress_bar$new(format = "Downloading Bob's paintings[:bar] :current/:total (:percent)", total = nrow(bob_ross))
+pb$tick(0)
+for (img_index in 1:nrow(bob_ross)) {
+  url <- bob_ross$img_src[img_index]
+  
+  # Define the local file name for the downloaded file
+  local_file <- paste0("img/bob_ross/",bob_ross$painting_index[img_index],".png")
+
+  # Download the file using download.file()
+  dl_result <- download.file(url, local_file, mode = "wb",quiet = TRUE)
+  pb$tick()
+}  
 
 # create RGB arrays
+# image is scaled down in size and color space to reduce the data size
 max_colors = 32
 img_scale = "20%"
 img_list <- list()
-for (img_index in 1:nrow(bob_ross)) {
-  print(paste(img_index,"/",nrow(bob_ross),bob_ross$painting_title[img_index]))
+pb <- progress_bar$new(format = "Extracting Bob's pixels [:bar] :current/:total (:percent)", total = nrow(bob_ross))
+pb$tick(0)
+for (img_index in 1:nrow(bob_ross)) {img_index
   local_file <- paste0("img/bob_ross/",bob_ross$painting_index[img_index],".png")
   img_data <- magick::image_read(local_file) %>%
     image_scale(img_scale)
@@ -59,6 +68,7 @@ for (img_index in 1:nrow(bob_ross)) {
     as_tibble() %>%
     mutate(title = bob_ross$painting_title[img_index])
   img_list<-bind_rows(img_rgb,img_list)
+  pb$tick()
 }
 
 # save(img_list,file="data/ross_img_data.rdata")
@@ -73,7 +83,7 @@ ggplot(img_tidy,aes(x=level,fill=color))+
   geom_density(alpha=0.7) + 
   scale_fill_manual(values=c("blue","green","red"))
 
-# downsample pixels
+# downsample pixels to reduce size further
 img_list_short <-img_list[sample(1:nrow(img_list),size = 1e05),]
 
 # get all paint colors
@@ -187,35 +197,36 @@ gg4 <- autoplot(img_PCA, x=2,y=3,data = img_list_short, colour = "cluster",
 
 ggpubr::ggarrange(gg1,gg2,gg3,gg4,nrow = 2,ncol = 2)
 # ----------------------------------------------------------------------------
-# Use just one image
-
-# just use one painting number 143
-img_index = 143
-img_list_single <- img_list %>%
-  filter(title == "Quiet Mountains River")
-
-
-
-local_file <- paste0("img/bob_ross/", img_index, ".png")
-img_data <- magick::image_read(local_file)
-img_rgb <- as.raster(img_data) %>%
-  col2rgb(alpha = FALSE) %>%
-  t() %>%
-  as_tibble() %>%
-  mutate(title = "Quiet Mountains River")
-
-print(img_data)
-img_data_32 <- img_data %>% image_quantize(max = 32)
-print(img_data_32)
-
-img_tidy <- img_rgb %>%
-  pivot_longer(
-    cols = c(red, green, blue),
-    names_to = "color",
-    values_to = "level" )
-
-# plot density of each, R,G and B
-ggplot(img_tidy, aes(x = level, fill = color)) +
-  geom_density(alpha = 0.7) +
-  scale_fill_manual(values = c("blue", "green", "red"))
-
+# Bonus code
+# # Use just one image
+# 
+# # just use one painting number 143
+# img_index = 143
+# img_list_single <- img_list %>%
+#   filter(title == "Quiet Mountains River")
+# 
+# 
+# 
+# local_file <- paste0("img/bob_ross/", img_index, ".png")
+# img_data <- magick::image_read(local_file)
+# img_rgb <- as.raster(img_data) %>%
+#   col2rgb(alpha = FALSE) %>%
+#   t() %>%
+#   as_tibble() %>%
+#   mutate(title = "Quiet Mountains River")
+# 
+# print(img_data)
+# img_data_32 <- img_data %>% image_quantize(max = 32)
+# print(img_data_32)
+# 
+# img_tidy <- img_rgb %>%
+#   pivot_longer(
+#     cols = c(red, green, blue),
+#     names_to = "color",
+#     values_to = "level" )
+# 
+# # plot density of each, R,G and B
+# ggplot(img_tidy, aes(x = level, fill = color)) +
+#   geom_density(alpha = 0.7) +
+#   scale_fill_manual(values = c("blue", "green", "red"))
+# 
