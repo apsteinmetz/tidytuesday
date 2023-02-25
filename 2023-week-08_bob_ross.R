@@ -71,8 +71,8 @@ for (img_index in 1:nrow(bob_ross)) {img_index
   pb$tick()
 }
 
-# save(img_list,file="data/ross_img_data.rdata")
-# load("data/ross_img_data.rdata") # "image_list" df
+#save(img_list,file="data/ross_img_data.rdata")
+load("data/ross_img_data.rdata") # "image_list" df
 
 #make data tidy first
 img_tidy <- img_list %>% 
@@ -82,9 +82,6 @@ img_tidy <- img_list %>%
 ggplot(img_tidy,aes(x=level,fill=color))+
   geom_density(alpha=0.7) + 
   scale_fill_manual(values=c("blue","green","red"))
-
-# downsample pixels to reduce size further
-img_list_short <-img_list[sample(1:nrow(img_list),size = 1e05),]
 
 # get all paint colors
 
@@ -126,24 +123,45 @@ gg1 <- paint_freq %>%
 
 show_col(paint_freq$color_hex,labels = TRUE)
 
+
+
 # make palette using kmeans
-num_colors = 32
+num_colors = 64
+
 #assign each pixel to a cluster
 set.seed(123)
-km <-  img_list_short[c("red","green","blue")] %>% 
+km <-  img_list[c("red","green","blue")] %>% 
   kmeans(centers = num_colors, iter.max = 30)
 
-pal_ross <- km$centers %>% 
-  rgb(maxColorValue = 255)
+centers <- as_tibble(km$centers) %>% 
+  rowid_to_column(var = "cluster") %>% 
+  rowwise() %>% 
+  mutate(hue = rgb2hsv(red,green,blue)[1]) %>% 
+  mutate(saturation = rgb2hsv(red,green,blue)[2]) %>% 
+  mutate(value = rgb2hsv(red,green,blue)[3]) %>% 
+  mutate(color_hex = rgb(red,green,blue,maxColorValue = 255)) %>% 
+  # if we want to sort by color instead of frequency
+  # arrange(hue,saturation,value) %>% 
+  identity()
+
+img_list <- img_list %>% 
+  mutate(cluster=as.factor(km$cluster)) 
+
+pal_ross <- centers$color_hex
 
 show_col(pal_ross)
 
-gg2 <- km$cluster %>% enframe(value = "color") %>% 
+
+cluster_agg <- km$cluster %>% enframe(value = "color") %>% 
   count(color,name="count") %>% 
   mutate(proportion = count/sum(count)) %>% 
-  bind_cols(as_tibble(t(rgb2hsv(t(km$centers))))) %>% 
   arrange(count) %>% 
-  mutate(color = as_factor(as.character(color))) %>% 
+  mutate(color = as_factor(as.character(color)))
+
+# if we want to sort by color instead of frequency
+# levels(cluster_agg$color) <- as.character(centers$cluster)
+
+gg2 <- cluster_agg %>% 
   ggplot(aes(color,proportion)) + geom_col(fill = pal_ross) + 
   scale_y_continuous(labels = scales::percent) + 
   theme(axis.text.y = element_blank()) + 
@@ -160,14 +178,17 @@ gg2 <- km$cluster %>% enframe(value = "color") %>%
             color space from 1.4mm to ~11,000.
 3) Perform k-means cluster analysis to generate 32 clusters
            with an 'average' color for each cluster.")
-
-
+gg2
 # kmeans PCA of colors
 
+
+# reduce data to unique colors to make plotting quicker
+img_list_short <-img_list %>% 
+  mutate(color_hex = rgb(red,green,blue,maxColorValue = 255)) %>% 
+  distinct(color_hex,.keep_all = TRUE)
+
+
 img_PCA<-prcomp(img_list_short[c("red","green","blue")])
-
-
-img_list_short <- img_list_short %>% mutate(cluster=as.factor(km$cluster))
 
 # plot derived colors against pc1 and pc2
 gg3 <- autoplot(img_PCA, x=1,y=2,data = img_list_short, colour = "cluster",
@@ -196,6 +217,7 @@ gg4 <- autoplot(img_PCA, x=2,y=3,data = img_list_short, colour = "cluster",
 
 
 ggpubr::ggarrange(gg1,gg2,gg3,gg4,nrow = 2,ncol = 2)
+
 # ----------------------------------------------------------------------------
 # Bonus code
 # # Use just one image
