@@ -8,8 +8,12 @@ library(scales) #just for for the show_col() function
 library(tidyverse)
 library(ggfortify)
 library(ggpubr)
+library(gridExtra)
 library(tidytuesdayR)
-library(progress)
+library(tidytext)
+library(furrr) # parallel processing
+library(pracma) # optional timer
+
 
 
 # Get the Data
@@ -25,40 +29,63 @@ library(progress)
 
 # bob_ross <- tuesdata$bob_ross
 
-# Save the data.
-# write_csv(
-#   bob_ross,
-#   here::here("data","bob_ross.csv")
-# )
 # bob_ross <- read_csv("data/bob_ross.csv")
 
 # Or read in the data manually
 bob_ross <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-21/bob_ross.csv')
+# Save the data.
+ write_csv(
+   bob_ross,
+   here::here("data","bob_ross.csv")
+ )
 
+# -----------------------------------------------------
 # download the paintings
 # This is gonna take some time
-pb <- progress_bar$new(format = "Downloading Bob's paintings[:bar] :current/:total (:percent)", total = nrow(bob_ross))
-pb$tick(0)
-for (img_index in 1:nrow(bob_ross)) {
-  url <- bob_ross$img_src[img_index]
-  
+download_paintings <- function(ndx) {
+  url <- bob_ross$img_src[ndx]
   # Define the local file name for the downloaded file
-  local_file <- paste0("img/bob_ross/",bob_ross$painting_index[img_index],".png")
-
+  local_file <-
+    paste0("img/bob_ross/", bob_ross$painting_index[ndx], ".png")
   # Download the file using download.file()
-  dl_result <- download.file(url, local_file, mode = "wb",quiet = TRUE)
-  pb$tick()
-}  
+  dl_result <- 
+    download.file(url, local_file, mode = "wb", quiet = TRUE)
+  return(tibble(img_src = url,error = dl_result))
+}
 
+print("Downloading paintings.")
+# Try it in parallel
+plan(multisession,workers = 4)
+tic()
+# error list should be all zeros
+error_list <- future_map(1:nrow(bob_ross),download_paintings,.progress = TRUE) %>% 
+  bind_rows()
+toc()
+plan(sequential)
+
+
+# # Same as above in sequential download fashion so slower
+# tic()
+# # error list should be all zeros
+# error_list <- map(1:nrow(bob_ross),download_paintings,.progress = TRUE) %>% 
+#   bind_rows()
+# toc()
+
+if (sum(error_list$error)>0) {
+  print("Error(s) downloading! The following URLs failed to download")
+  filter(error_list, error > 0)
+} else print("No Errors Downloading!")
+
+
+# -----------------------------------------------------
 # create RGB arrays
-# image is scaled down in size and color space to reduce the data size
-max_colors = 32
+# image is optinally scaled down in size and color space to reduce the data size
+max_colors = Inf
 img_scale = "20%"
-img_list <- list()
-pb <- progress_bar$new(format = "Extracting Bob's pixels [:bar] :current/:total (:percent)", total = nrow(bob_ross))
-pb$tick(0)
-for (img_index in 1:nrow(bob_ross)) {img_index
-  local_file <- paste0("img/bob_ross/",bob_ross$painting_index[img_index],".png")
+
+# extract RGB data from images
+load_img_data <- function(ndx){
+  local_file <- paste0("img/bob_ross/",bob_ross$painting_index[ndx],".png")
   img_data <- magick::image_read(local_file) %>%
     image_scale(img_scale)
   if (max_colors < Inf) img_data <- image_quantize(img_data, max = max_colors)
@@ -66,14 +93,35 @@ for (img_index in 1:nrow(bob_ross)) {img_index
     col2rgb(alpha=FALSE) %>%
     t() %>%
     as_tibble() %>%
-    mutate(title = bob_ross$painting_title[img_index])
-  img_list<-bind_rows(img_rgb,img_list)
-  pb$tick()
+    mutate(title = bob_ross$painting_title[ndx],
+           index = bob_ross$painting_index[ndx],
+           color_hex = rgb(red,green,blue,maxColorValue = 255))
+  return(img_rgb)
 }
 
-#save(img_list,file="data/ross_img_data.rdata")
-load("data/ross_img_data.rdata") # "image_list" df
+# Build a data frame of RGB of all images
+print("Extracting RGB arrays from paintings.")
 
+# Parallel processing to speed it up
+# This is about half the time on my machine
+plan(multisession,workers = 4)
+tic()
+img_list <- future_map(1:nrow(bob_ross),load_img_data,.progress = TRUE) %>% 
+  bind_rows()
+toc()
+plan(sequential)
+
+# # Same as above if you want to do it in non-parallel fashion
+# tic()
+# img_list <- map(1:nrow(bob_ross),load_img_data) %>% 
+#   bind_rows()
+# toc()
+
+# save(img_list,file="data/ross_img_data.rdata")
+# load("data/ross_img_data.rdata") # "image_list" df
+
+# -----------------------------------------------------
+# Do the analysis
 #make data tidy first
 img_tidy <- img_list %>% 
   pivot_longer(cols = c(red,green,blue),names_to = "color",values_to = "level")
@@ -94,6 +142,8 @@ items2list <- function(items) {
   return(sep_items)
 }
 
+# ----------------------------------------------
+# look at the paints Bob uses
 # make list columns out of colors
 bob_ross_2 <- bob_ross %>% 
   mutate(color_name = items2list(colors)) %>% 
@@ -123,15 +173,18 @@ gg1 <- paint_freq %>%
 
 show_col(paint_freq$color_hex,labels = TRUE)
 
-
+# ----------------------------------------------
+# look at the resulting colors Bob gets
 
 # make palette using kmeans
-num_colors = 64
+num_colors = 32
 
 #assign each pixel to a cluster
 set.seed(123)
+tic()
 km <-  img_list[c("red","green","blue")] %>% 
   kmeans(centers = num_colors, iter.max = 30)
+toc()
 
 centers <- as_tibble(km$centers) %>% 
   rowid_to_column(var = "cluster") %>% 
@@ -150,7 +203,6 @@ img_list <- img_list %>%
 pal_ross <- centers$color_hex
 
 show_col(pal_ross)
-
 
 cluster_agg <- km$cluster %>% enframe(value = "color") %>% 
   count(color,name="count") %>% 
@@ -183,25 +235,34 @@ gg2
 
 
 # reduce data to unique colors to make plotting quicker
+# smaller numbers shorten plotting time
+# lets try 40,000
+pixel_count = 50000
 img_list_short <-img_list %>% 
   mutate(color_hex = rgb(red,green,blue,maxColorValue = 255)) %>% 
-  distinct(color_hex,.keep_all = TRUE)
+  distinct(color_hex,.keep_all = TRUE) %>% 
+  slice_sample(n = pixel_count)
 
 
 img_PCA<-prcomp(img_list_short[c("red","green","blue")])
 
+var_expl <- round(img_PCA$sdev^2/sum(img_PCA$sdev^2)*100)
 # plot derived colors against pc1 and pc2
+
+
+
 gg3 <- autoplot(img_PCA, x=1,y=2,data = img_list_short, colour = "cluster",
          loadings = TRUE, loadings.colour = 'blue',
          loadings.label = TRUE, loadings.label.size = 10) +
   scale_color_manual(values=rgb(km$centers,maxColorValue = 255),guide="none")+
   theme_classic() + 
-  theme(plot.title = element_text(family = "serif",face = "italic")) + 
-  labs(title = "86% of Color Variation in Bob Ross Paintings\n   is Due to Luminosity",
+  theme(plot.title = element_text(family = "serif",face = "italic")) +
+  labs(title = glue::glue("{var_expl[1]}% of Color Variation in Bob Ross Paintings\n   is Due to Luminosity"),
        subtitle = "Principal Component analysis of Colors",
-       x = "PC1, 86%, Interpet as Luminosity",
-       y = "PC2, 12%, Interpret as Hue")
+       x = glue::glue("PC 1, {var_expl[1]}% Variance Explained\nInterpret as Luminance"),
+       y = glue::glue("PC 2, {var_expl[2]}% Variance Explained"))
 
+gg3
 # in practice pc1 is luminosity while pc2 2 and 3 get into hue
 # plot derived colors against pc2 and pc3
 gg4 <- autoplot(img_PCA, x=2,y=3,data = img_list_short, colour = "cluster",
@@ -212,14 +273,97 @@ gg4 <- autoplot(img_PCA, x=2,y=3,data = img_list_short, colour = "cluster",
   theme(plot.title = element_text(family = "serif",face = "italic")) + 
   labs(title = "PC2 and PC3 Create an Orthogonal Color Space",
        subtitle = "Principal Component analysis of Colors",
-       x = "PC2, 12%",
-       y = "PC3, 2% of Variance Explained")
+       x = glue::glue("PC 2, {var_expl[2]}% Variance Explained"),
+       y = glue::glue("PC 3, {var_expl[3]}% Variance Explained"))
 
 
+gg4
 ggpubr::ggarrange(gg1,gg2,gg3,gg4,nrow = 2,ncol = 2)
 
 # ----------------------------------------------------------------------------
 # Bonus code
+# make Bob Ross palettes after the idea of Wes Anderson palettes
+
+# get the most frequent words in painting names
+# and paintings that contain them in a list-column
+paint_words <- bob_ross %>% 
+  select(painting_index,painting_title) %>% 
+  separate_rows(painting_title) %>% 
+  rename(word = painting_title) %>% 
+  mutate(word = tolower(word)) %>% 
+  anti_join(stop_words) %>% 
+  mutate(word = str_remove(word,"'s")) %>% 
+  mutate(word = str_replace(word,"mt.","mountain")) %>% 
+  left_join(select(bob_ross,painting_index,painting_title)) %>% 
+  rename(title = "painting_title") %>% 
+  select(title,word) %>% 
+  group_by(word) %>% 
+  nest() %>% 
+  rename(titles = data) %>% 
+  mutate(freq = nrow(pluck(titles,1))) %>% 
+  arrange(desc(freq)) %>% 
+  # "oval" is always linked with a more meaningful word so skip
+  filter(word != "oval") %>% 
+  ungroup()
+
+top_paint_words %>%  
+  slice_head(n=10)
+
+# Build a low-color data frame of RGB of all images
+max_colors = 8
+print("Extracting RGB arrays from paintings.")
+# Parallel processing to speed it up
+# This is about half the time on my machine
+plan(multisession,workers = 4)
+tic()
+img_list <- future_map_dfr(1:nrow(bob_ross),load_img_data,.progress = TRUE)
+toc()
+plan(sequential)
+
+# get the hex color data from each painting
+
+get_hex_colors <- function(img_titles){
+  gch <- function(img_title){
+    img_list %>%
+      filter(title == img_title) %>% 
+      select(color_hex)
+  }
+  img_titles <- img_titles %>% pluck(1)
+  img_titles %>% 
+    map_df(gch) %>% 
+    group_by(color_hex) %>%
+    count() %>% 
+    ungroup() %>% 
+    slice_max(order_by = n,n=10)
+}
+
+top_paint_words <- top_paint_words$titles %>%
+  map(get_hex_colors) %>% 
+  set_names(nm=top_paint_words$word) %>% 
+  enframe(name="word",value="top_colors_hex") %>% 
+  right_join(top_paint_words)
+
+
+# plot one Palette
+plot_one<-function(pal_name){
+  tmp <- top_paint_words %>% unnest(top_colors_hex) %>% 
+    filter(word==pal_name)
+  g<- ggplot(tmp,aes(color_hex,fill=color_hex)) + geom_bar() + 
+    scale_fill_manual(values=tmp$color_hex,guide=F) +
+    theme_void()+ggtitle(pal_name)
+  return (g)
+  
+}
+
+lapply(top_paint_words$word,plot_one) %>% 
+  grid.arrange(grobs=.)
+
+# ----------------------------------------------
+# Word Cloud!
+paint_words %>% 
+  select(word,freq) %>% 
+wordcloud2::wordcloud2(size = 0.8)
+
 # # Use just one image
 # 
 # # just use one painting number 143
