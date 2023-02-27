@@ -306,7 +306,7 @@ paint_words <- bob_ross %>%
   filter(word != "oval") %>% 
   ungroup()
 
-top_paint_words %>%  
+top_paint_words <-paint_words %>% 
   slice_head(n=10)
 
 # Build a low-color data frame of RGB of all images
@@ -322,23 +322,36 @@ plan(sequential)
 
 # get the hex color data from each painting
 
-get_hex_colors <- function(img_titles){
+get_color_clusters <- function(img_titles){
+  num_colors <- 8
+  # this takes a list of image titles
+  # and returns 8 key colors from each list
   gch <- function(img_title){
     img_list %>%
       filter(title == img_title) %>% 
-      select(color_hex)
+      select(red,green,blue)
   }
-  img_titles <- img_titles %>% pluck(1)
-  img_titles %>% 
+  img_titles_l <- img_titles %>% 
+    pull(title)
+  km <- img_titles_l %>% 
     map_df(gch) %>% 
-    group_by(color_hex) %>%
-    count() %>% 
-    ungroup() %>% 
-    slice_max(order_by = n,n=10)
+    # group_by(color_hex) %>%
+    # count() %>% 
+    # ungroup() %>% 
+    # slice_max(order_by = n,n=10)
+    kmeans(centers = num_colors, iter.max = 30)
+  sort_by_lum <- as_tibble(km$centers) %>% 
+    rowwise() %>%  
+    mutate(luminance = rgb2hsv(red,green,blue)[3]) %>% 
+    arrange(luminance) %>% 
+    mutate(color_hex =  rgb(red,green,blue,maxColorValue = 255)) %>% 
+    pull(color_hex)
+  
+  return(sort_by_lum)
 }
 
-top_paint_words <- top_paint_words$titles %>%
-  map(get_hex_colors) %>% 
+top_colors <- top_paint_words$titles %>%
+  map(get_color_clusters) %>% 
   set_names(nm=top_paint_words$word) %>% 
   enframe(name="word",value="top_colors_hex") %>% 
   right_join(top_paint_words)
@@ -346,16 +359,17 @@ top_paint_words <- top_paint_words$titles %>%
 
 # plot one Palette
 plot_one<-function(pal_name){
-  tmp <- top_paint_words %>% unnest(top_colors_hex) %>% 
+  tmp <- top_colors %>% 
+    unnest(top_colors_hex) %>% 
     filter(word==pal_name)
-  g<- ggplot(tmp,aes(color_hex,fill=color_hex)) + geom_bar() + 
-    scale_fill_manual(values=tmp$color_hex,guide=F) +
+  g<- ggplot(tmp,aes(top_colors_hex,fill=top_colors_hex)) + geom_bar() + 
+    scale_fill_manual(values=tmp$top_colors_hex,guide=F) +
     theme_void()+ggtitle(pal_name)
   return (g)
   
 }
 
-lapply(top_paint_words$word,plot_one) %>% 
+lapply(top_colors$word,plot_one) %>% 
   grid.arrange(grobs=.)
 
 # ----------------------------------------------
