@@ -1,9 +1,12 @@
 # translate african tweets
+# 111,720 tweets cost $14.87 to translate on the google cloud. Not cheap.
+# some money could have been saved by omitting the tweets already in English.
 
 library(tidyverse)
 library(googleLanguageR)
 library(furrr)
 library(tictoc)
+
 
 googleLanguageR::gl_auth(Sys.getenv("googleLanguage"))
 
