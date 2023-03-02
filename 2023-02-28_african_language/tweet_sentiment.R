@@ -4,7 +4,9 @@ library(tidytext)
 library(tictoc)
 library(rayshader)
 
-load(file="data/afrisenti_translated.rdata")
+file_name <- paste0(here::here(),"/2023-02-28_african_language/data/afrisenti_translated.rdata")
+load(file = file_name)
+
 
 tweet_word_sentiment <- afrisenti_translated %>% 
   select(tweet_num,language_iso_code, translatedText) %>% 
@@ -19,8 +21,10 @@ tweet_word_sentiment <- afrisenti_translated %>%
   rowwise() %>% 
   mutate(sentiment_bing = switch(sentiment,"negative" = -1,"neutral"=0,"positive"=1))
 
+# rubric for blending afinn and bing sentiments
 
 senti_vote <- Vectorize(function(label_1,label_2){
+  if(label_1 == label_2) return(label_1)
   label <- label_1
   if((label_1 == "negative") & (label_2 == "positive")) label <-  "neutral"
   if((label_2 == "negative") & (label_1 == "positive")) label <-  "neutral"
@@ -77,12 +81,20 @@ xt <-  xtabs(~label+label_combo, data=tweet_sentiment) %>%
 
 gg <- xt %>% 
   ggplot(aes(label,label_combo,fill=n)) + geom_tile() +
-  geom_text(aes(label = paste0(as.character(prop),"%"))) +
-  labs(title = "Q: Can We Use Google Translate And Test Sentiment in English?",
-       subtitle = "Not really. Translated sentiment agrees only half the time.",
+  labs(title = "African Languages Tweets\nQ: Can We Use Google Translate And Test Sentiment in English?",
+       subtitle = "A: Not really. Translated sentiment agrees only half the time.",
        x = "Native Language Sentiment",
        y= "Google Translate Sentiment",
-       caption = "source: Afrisenti Data Set")
+       caption = "source: Afrisenti Data Set") + 
+  scale_fill_gradient(low = "#FFBF00",high = "#007000") +
+  theme(text = element_text(family = "dm"),
+        plot.background = element_rect(fill = "#FDECCD", color = NA),
+        legend.background = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        panel.grid = element_blank())
+
+gg + geom_text(aes(label = paste0(as.character(prop),"%")))
 
 plot_gg(gg, width = 5, height = 5, multicore = TRUE, scale = 250, 
         zoom = 0.7, theta = 10, phi = 30, windowsize = c(800, 800))
