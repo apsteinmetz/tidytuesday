@@ -8,7 +8,7 @@ load("data/afrisenti_translated.rdata")
 
 
 tokens <- afrisenti_translated %>%  
-  select(language_iso_code,translatedText) %>% 
+  select(assigned_long,translatedText) %>% 
   unnest_tokens(word, translatedText ) %>% 
   anti_join(stop_words) %>% 
   count(word, sort = TRUE)
@@ -16,21 +16,21 @@ tokens <- afrisenti_translated %>%
 trans_dtm <- cast_dtm(tokens,word)
 
 langs <- afrisenti_translated %>%
-  select(language_iso_code,detectedSourceLanguage) %>%
+  select(assigned_long,detected_long) %>%
   distinct()
 
 
-xt <- xtabs(~language_iso_code+detectedSourceLanguage,afrisenti_translated) %>% 
+xt <- xtabs(~assigned_long+detected_long,afrisenti_translated) %>% 
   broom::tidy()  %>% 
   mutate(across(where(is.character),as.factor)) %>% 
-  group_by(language_iso_code) %>% 
+  group_by(assigned_long) %>% 
   mutate(prop = round(100*n/sum(n))) %>% 
   arrange(desc(n)) %>% 
   filter(prop > 1)
 
 
 gg <- xt %>% 
-  ggplot(aes(language_iso_code,detectedSourceLanguage,fill=prop)) + geom_tile() +
+  ggplot(aes(assigned_long,detected_long,fill=prop)) + geom_tile() +
   labs(title = "African Languages Tweets\nQ: Who Are The Most Polyglot Tweeters",
        subtitle = "A: The Tsongan People",
        x = "Afrisenti Labeled Language Code",
