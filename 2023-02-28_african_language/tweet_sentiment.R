@@ -36,11 +36,10 @@ senti_vote <- Vectorize(function(label_1,label_2){
 tic()
 tweet_sentiment <- tweet_word_sentiment %>% 
   group_by(language_iso_code,tweet_num) %>% 
-  summarise(sentiment_afinn = sum(sentiment_afinn),
-            sentiment_bing = sum(sentiment_bing),
+  summarise(sentiment_afinn = as.integer(sum(sentiment_afinn)),
+            sentiment_bing = as.integer(sum(sentiment_bing)),
             .groups = "keep") %>% 
   left_join(afrisenti_translated) %>% 
-  mutate(label = as.factor(label)) %>% 
   mutate(label_afinn = cut(sentiment_afinn,breaks = c( -Inf,-1,0,Inf),
                            labels=c("negative","neutral","positive"))) %>% 
   mutate(label_bing = cut(sentiment_bing,breaks = c( -Inf,-1,0,Inf),
@@ -51,6 +50,8 @@ tweet_sentiment <- tweet_word_sentiment %>%
   # this is mighty slow
   mutate(label_combo = as.factor(senti_vote(label_afinn,label_bing)))
 toc()
+
+save(tweet_sentiment,file="data/trans_tweet_sentiment.rdata")
 
 # some EDA
 summary(tweet_sentiment)  
