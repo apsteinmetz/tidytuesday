@@ -9,7 +9,7 @@ load(file = file_name)
 
 
 tweet_word_sentiment <- afrisenti_translated %>% 
-  select(tweet_num,language_iso_code, translatedText) %>% 
+  select(tweet_num,assigned_language, detected_language, translatedText) %>% 
   separate_rows(translatedText) %>%
   rename(word = translatedText) %>% 
   anti_join(stop_words) %>% 
@@ -35,7 +35,7 @@ senti_vote <- Vectorize(function(label_1,label_2){
 
 tic()
 tweet_sentiment <- tweet_word_sentiment %>% 
-  group_by(language_iso_code,tweet_num) %>% 
+  group_by(assigned_language,tweet_num) %>% 
   summarise(sentiment_afinn = as.integer(sum(sentiment_afinn)),
             sentiment_bing = as.integer(sum(sentiment_bing)),
             .groups = "keep") %>% 
