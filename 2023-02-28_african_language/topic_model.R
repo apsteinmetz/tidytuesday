@@ -11,11 +11,24 @@ my_stop_words = tibble(word = c("http","https","dey","de","al","url","na",
                                 "t.co","rt","user","users","wey","don",
                                 as.character(1:100)))
 
+# I don't know what I'm doing but 2-letter words probably don't convey
+# as much as longer words
+
 tokens <- afrisenti_translated %>%  
   select(tweet_num,assigned_long,translatedText,label) %>% 
   unnest_tokens(word,translatedText )  |> 
   rowid_to_column(var="word_num")
 
+# do it with native
+tokens <- afrisenti_translated %>%  
+  select(tweet_num,assigned_long,tweet,label) %>% 
+  unnest_tokens(word,tweet )  |> 
+  rowid_to_column(var="word_num")
+
+tokens <- tokens |> 
+  filter(str_length(word) > 2)
+  
+  
 
 not_words_rows <- tokens |> 
   filter(word =="not") |> 
