@@ -13,7 +13,19 @@ my_stop_words = tibble(word = c("http","https","dey","de","al","url",
 
 tokens <- afrisenti_translated %>%  
   select(tweet_num,assigned_long,translatedText,label) %>% 
-  unnest_tokens(word,translatedText ) %>% 
+  unnest_tokens(word,translatedText )
+
+not_words_rows <- tokens |> 
+  rowid_to_column(var="word_num") |> 
+  filter(word =="not") |> 
+  mutate(word_num = word_num  + 1) |> 
+  pull(word_num)
+
+
+
+
+
+tokens %>% 
   anti_join(stop_words) |> 
   anti_join(my_stop_words)
 
