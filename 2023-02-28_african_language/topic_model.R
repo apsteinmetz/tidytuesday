@@ -3,6 +3,7 @@ library(tidyverse)
 library(tidytext)
 library(tidymodels)
 library(tm)
+library(tictoc)
 
 setwd("2023-02-28_african_language")
 load("data/afrisenti_translated.rdata")
@@ -19,14 +20,14 @@ tokens <- afrisenti_translated %>%
   unnest_tokens(word,translatedText )  |> 
   rowid_to_column(var="word_num")
 
-# do it with native
-tokens <- afrisenti_translated %>%  
-  select(tweet_num,assigned_long,tweet,label) %>% 
-  unnest_tokens(word,tweet )  |> 
-  rowid_to_column(var="word_num")
-
-tokens <- tokens |> 
-  filter(str_length(word) > 2)
+# # do it with native
+# tokens <- afrisenti_translated %>%  
+#   select(tweet_num,assigned_long,tweet,label) %>% 
+#   unnest_tokens(word,tweet )  |> 
+#   rowid_to_column(var="word_num")
+# 
+# tokens <- tokens |> 
+#   filter(str_length(word) > 2)
   
   
 
@@ -48,7 +49,7 @@ tokens <- tokens %>%
 # full set will be wasteful and slow
 # one author suggested 2000
 
-word_count <- 20
+word_count <- 2000
 
 chosen_words <- tokens |> 
   ungroup() |> 
@@ -80,6 +81,22 @@ dtmm <- right_join(temp1,temp2) |>
   select(-document)
 
 
-randomForest::randomForest(label ~.,data=dtmm)
+# ---------------------------------------------------------
+# run the models
+cores <- parallel::detectCores()
+cores
+
+rf <- parsnip::rand_forest() %>% 
+  set_engine("randomForest",num.threads = cores-1) %>% 
+  set_mode("classification")
+
+
+
+tic()
+rf_fit <- rf_mod %>% 
+  fit(label ~ ., data = dtmm)
+toc()
+
+summary(predict(rf_fit,dtmm))
 
 
