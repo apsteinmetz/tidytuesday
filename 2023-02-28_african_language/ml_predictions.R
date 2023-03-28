@@ -28,7 +28,7 @@ tokenize <- function(dataset, use_translated = FALSE) {
   tokens <- dataset %>%
     select(tweet_num,
            sentiment,
-           language,
+           lang,
            ifelse(use_translated, "translatedText", "tweet")) %>%
     unnest_tokens(word, !!(ifelse(
       use_translated, "translatedText", "tweet"

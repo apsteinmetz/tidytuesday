@@ -1,0 +1,139 @@
+---
+title: "sentiment models"
+format: html
+editor: visual
+---
+
+Our purpose is twofold. First, it is interesting to ask whether we can build a better model for analyzing tweet sentiment in African languages by using native languages, many of them, or translate them all into one language first, English, using Google Translate.
+
+[Paper describing data set](https://arxiv.org/pdf/2302.08956.pdf)
+
+[African stopwords from Kaggle](https://www.kaggle.com/datasets/rtatman/stopword-lists-for-african-languages?resource=download)
+
+Second, we want to explore using sparse data structures in the Tidy modeling framework. We will be using document term models which can generate giant, but mostly empty, matrices. Sparse data saves gobs of memory and boosts speed. As with many of my explorations, I start by seeing what [Julia Silge has to teach me about it](https://www.tidyverse.org/blog/2020/11/tidymodels-sparse-support/). One thing that is both frustrating and thrilling is finding out that I've been doing a lot of things the hard way and my code can be so much cleaner and faster.
+
+```{r}
+# topic modeling of sentiment
+library(tidyverse)
+library(tidytext)
+library(tidymodels)
+library(tm)
+library(tictoc)
+library(butcher)
+library(rayshader)
+library(yardstick)
+library(quanteda)
+
+setwd("/2023-02-28_african_language")
+load("data/afrisenti_translated.rdata")
+```
+
+Split into training and test sets based on designation already provided in data set. What is the reason for this split? I don't know.
+
+```{r}
+# ----- SETUP ------------------------------
+afrisenti_translated <- afrisenti_translated %>%
+  mutate(lang = as.factor(assigned_long)) %>%
+  mutate(lang_iso = as.factor(assigned_language)) %>%
+  mutate(sentiment = as.factor(label)) %>% 
+  select(tweet_num,sentiment,lang,lang_iso,tweet,translatedText,intended_use)
+
+summary(afrisenti_translated)
+```
+
+```{r}
+tweet_train <- afrisenti_translated %>% 
+  filter(intended_use == "train") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+tweet_test <- afrisenti_translated %>% 
+  filter(intended_use == "test") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+tweet_the_rest <- afrisenti_translated %>% 
+  filter(intended_use == "dev") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+```
+
+Let's see if the training set is representative of the test set.Do the languages align?
+
+```{r}
+afrisenti_translated %>% 
+ggplot(aes(lang_iso,group=intended_use)) + 
+   geom_bar(aes(y = after_stat(prop))) + 
+          scale_y_continuous(labels=scales::percent) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  facet_grid(~intended_use)
+```
+
+Looks okay.
+
+Do the sentiments align?
+
+```{r}
+afrisenti_translated %>% 
+ggplot(aes(sentiment,group=intended_use)) + 
+   geom_bar(aes(y = after_stat(prop))) + 
+          scale_y_continuous(labels=scales::percent) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  facet_grid(~intended_use)
+
+```
+
+They look pretty balanced.
+
+Now lets prepare the data. First we break each tweet into separate words, or tokens. To run a classifier model we basically associate the presence or absence of a word with a sentiment. That means every tweet is a row and every word in every tweet is a column indicating the number of times it appears in the tweet. This makes for an enormous matrix that takes up memory and a lot of time to scan. Since every word in the whole corpus is represented in every row we can assume the vast majority of cells have zero in them so it's a very sparse matrix. We have sparsity-aware tools that can make our job much more efficient.
+
+::: callout-caution
+Note that we don''t care what language the token is. It could be any language or no language. It could be an emoji, as long as it is associated with a sentiment. There is a risk that the same word could convey the opposite sentiment in two different languages but I assume it is rare enough to ignore.
+:::
+
+We can do slightly better than just noting how often a word appears in a tweet by computed each word's tf-idf.  I'll let you look up the details of this but it is basically a measure of the word's uniqueness in the corpus.
+
+Also, I would like the language itself to be a feature.  Maybe the speakers of a certain language use Twitter just to complain.  To do this I'll add the language name as a word at the end of every tweet.
+
+```{r}
+tweet_words_af <-tweet_train %>%
+  select(tweet_num,lang,tweet) %>% 
+  mutate(tweet = paste(tweet,lang)) %>% 
+  unnest_tokens(word, tweet) %>%
+  count(tweet_num, lang, word) %>%
+  bind_tf_idf(word, tweet_num, n)
+
+tweet_words_af
+```
+
+It is common in analyzing text to drop low-information words or "stop words."  In English, words like "the" and "that."  On Kaggle I found a list of stop words in various African languages.  It doesn't cover every language in our data set but will reduce the matrix size a bit.
+
+```{r}
+# path update needed in blog
+load("~/R Projects/tidytuesday/2023-02-28_african_language/data/stopwords_af.rdata")
+
+tweet_words_af <- tweet_words_af %>% 
+  anti_join(stopwords_af, by = "lang")
+
+tweet_words_af
+```
+Wow! Throwing out words we know won't help cuts down the data set size by about 40%!
+
+Suppose we don't have a list of stop words for our langauge of interest? One of the benefits of the tf-idf score is stop words will naturally have a very low score because of their common-ness.
+
+Finally, we convert this list of tokens into te sparse matrix our model will use.
+```{r}
+sparse_tweet_af <- tweet_words_af %>%
+  cast_dfm(tweet_num, word, tf_idf)
+
+sparse_tweet_af
+```
+
+how to add langauge as  feature
+```{r}
+convert(dfm_match(sparse_tweet_af,"docs"),to="data.frame") %>% 
+  rename(tweet_num = docs) %>% 
+  right_join(tweet_train) %>% 
+  select(tweet_num,lang) %>% 
+  cast_dfm()
+```
+
+
