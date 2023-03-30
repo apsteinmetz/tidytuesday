@@ -3,12 +3,12 @@ library(tidyverse)
 library(tidytext)
 library(tidymodels)
 library(tm)
+library(vip)
 library(tictoc)
 library(butcher)
-library(rayshader)
 library(yardstick)
 
-setwd("2023-02-28_african_language")
+# setwd("2023-02-28_african_language")
 load("data/afrisenti_translated.rdata")
 
 
@@ -17,11 +17,24 @@ afrisenti_translated <- afrisenti_translated %>%
   mutate(lang = as.factor(assigned_long)) %>%
   mutate(sentiment = as.factor(label))
 
+tweet_train <- afrisenti_translated %>% 
+  filter(intended_use == "train") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+tweet_test <- afrisenti_translated %>% 
+  filter(intended_use == "test") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+tweet_dev <- afrisenti_translated %>% 
+  filter(intended_use == "dev") %>% 
+  select(tweet_num,sentiment,lang,tweet)
+
+
 # add my stop words to defaults
-my_stop_words = tibble(word = c("http","https","dey","de","al","url","na",
-                                "t.co","rt","user","users","wey","don",
-                                as.character(1:100))) %>% 
-  bind_rows(stop_words)
+my_stop_words = tibble(word = c("http","https","dey","de","al","url","na","t.co","rt","user","users","wey","don",
+                                as.character(1:100),
+                                "?????????", "?????????","?????????")) %>% 
+bind_rows(stop_words)
 
 # split into words. Choose native or English
 tokenize <- function(dataset, use_translated = FALSE) {
@@ -32,23 +45,25 @@ tokenize <- function(dataset, use_translated = FALSE) {
            ifelse(use_translated, "translatedText", "tweet")) %>%
     unnest_tokens(word, !!(ifelse(
       use_translated, "translatedText", "tweet"
-    )))  |>
-    rowid_to_column(var = "word_num")
+    )))
   return(tokens)
 }
 
 
 # turn words preceded by "not" into "not_<word>"
 # to create a negated token
-detect_negations <- function(tokens) {
-  # this helps for english only, obviously  
+detect_negations <- function(tokens,negation_words = c("not")) {
+  # function to negate tokenized data
+  tokens <- tokens %>% rowid_to_column(var="word_num")
   not_words_rows <- tokens |> 
-    filter(word =="not") |> 
-    mutate(word_num = word_num  + 1) |> 
+    filter(word %in% negation_words) |> 
+    mutate(word_num = word_num) |> 
     pull(word_num)
   tokens <- tokens %>% 
     # create negated terms
-    mutate(word = ifelse(word_num %in% not_words_rows,paste0("not_",word),word))
+    filter(!(word_num %in% not_words_rows)) |> 
+    mutate(word = ifelse(word_num %in% (not_words_rows+1),paste0("not_",word),word)) |> 
+    select(-word_num)
   return(tokens)
 }
 
@@ -57,7 +72,7 @@ detect_negations <- function(tokens) {
 # one author suggested 2000
 # remove stop words first
 
-get_top_words <- function(tokens, word_count = 1000) {
+get_top_words <- function(tokens, word_count = 1000, my_stopwords) {
   chosen_words <- tokens |>
     anti_join(my_stop_words) %>% 
     ungroup() |>
@@ -82,8 +97,7 @@ make_dtm <- function(tokens) {
   
   
   dtmm <- tweet_dtm |>
-    pivot_wider(names_from = term, values_from = count) |>
-    mutate(across(everything(), ~ replace_na(.x, 0))) %>% 
+    pivot_wider(names_from = term, values_from = count, values_fill = 0) %>% 
     mutate(tweet_num = as.numeric(document)) %>% 
     left_join(select(afrisenti_translated,tweet_num,sentiment,lang),by="tweet_num") %>% 
     select(sentiment,lang,everything()) %>% 
@@ -113,6 +127,12 @@ tokens_e <- afrisenti_translated %>%
 # ---------------------------------------------------------
 # run the models
 
+tic()
+dtmm <- make_dtm(tokens_a)
+toc()
+
+
+
 cores <- parallel::detectCores()
 rf_mod <- parsnip::rand_forest(trees = 100) %>% 
   set_engine("ranger",num.threads = cores,importance = "impurity") %>% 
@@ -124,9 +144,6 @@ rf_recipe <-
 
 
 
-tic()
-dtmm <- make_dtm(tokens_e)
-toc()
 
 rf_workflow <- 
   workflow() %>% 
@@ -136,10 +153,10 @@ rf_workflow <-
 translate(rf_mod)
 
 
-rf_workflow %>% 
-  fit(mtcars) %>% 
-  extract_fit_parsnip() %>% 
-  vip(num_features = 10)
+#rf_workflow %>% 
+#  fit(mtcars) %>% 
+#  extract_fit_parsnip() %>% 
+#  vip(num_features = 10)
 
 
 tic()
@@ -147,11 +164,10 @@ rf_fit <- rf_workflow %>%
   fit(dtmm)
 toc()
 
-# summary(predict(rf_fit,dtmm[-1]))
+summary(predict(rf_fit,dtmm[-1]))
 
 # Validation set assessment #1: looking at confusion matrix
-predicted_for_table <- tibble(dtmm[,1],predict(rf_fit_native,dtmm[,-(1:2)])) %>% 
-  rename(observed = label,predicted = .pred_class)
+predicted_for_table <- tibble(dtmm[,1],predict(rf_fit,dtmm))
 
 xt <- table(predicted_for_table) %>% 
   broom::tidy() %>% 
@@ -185,14 +201,14 @@ pretty_colours <- c("#F8766D","#00BA38","#619CFF")
 library(ROCR)
 # Calculate the probability of new observations belonging to each class
 predicted_for_roc_curve<- tibble(dtmm[,1:2],
-                              predict(rf_fit_native,dtmm[,-1],type="prob")) %>% 
-  rename(observed = label)
+                              predict(rf_fit,dtmm[,-1],type="prob"))
+
 
 predicted_for_roc <- bind_cols(predicted_for_table,predicted_for_roc_curve[,2:4])
 
-metrics(predicted_for_roc,observed,predicted)
+metrics(predicted_for_roc,sentiment,.pred_class)
 
 predicted_for_roc_curve %>% 
-  group_by(assigned_long) %>% 
-  roc_curve(observed,.pred_negative:.pred_positive) %>% 
+  group_by(lang) %>% 
+  roc_curve(sentiment,.pred_negative:.pred_positive) %>% 
   autoplot()

@@ -18,17 +18,22 @@ afrisenti_translated <- afrisenti_translated %>%
   mutate(lang = as.factor(assigned_long)) %>%
   mutate(sentiment = as.factor(label))
 
+# make negation tokens
+afrisenti_translated <- afrisenti_translated %>%
+  mutate(tweet = str_replace(tweet, "not ","not_")) %>%
+  mutate(translatedText = str_replace(translatedText, "not ","not_"))
+
 tweet_train <- afrisenti_translated %>% 
   filter(intended_use == "train") %>% 
-  select(tweet_num,sentiment,lang,tweet)
+  select(tweet_num,sentiment,lang,tweet,translatedText)
 
 tweet_test <- afrisenti_translated %>% 
   filter(intended_use == "test") %>% 
-  select(tweet_num,sentiment,lang,tweet)
+  select(tweet_num,sentiment,lang,tweet,translatedText)
 
 tweet_dev <- afrisenti_translated %>% 
   filter(intended_use == "dev") %>% 
-  select(tweet_num,sentiment,lang,tweet)
+  select(tweet_num,sentiment,lang,tweet,translatedText)
 
 # add my stop words to defaults
 my_stop_words = tibble(word = c("http","https","dey","de","al","url","na","t.co","rt","user","users","wey","don",
@@ -44,19 +49,20 @@ full_stop_words <-  c(
 
 # turn words preceded by "not" into "not_<word>"
 # to create a negated token
-detect_negations <- function(tokens) {
-  # this helps for english only, obviously  
+detect_negations <- function(tokens,negation_words = c("not")) {
+  # function to negate tokenized data
   tokens <- tokens %>% rowid_to_column(var="word_num")
   not_words_rows <- tokens |> 
-    filter(word =="not") |> 
-    mutate(word_num = word_num  + 1) |> 
+    filter(word %in% negation_words) |> 
+    mutate(word_num = word_num) |> 
     pull(word_num)
   tokens <- tokens %>% 
     # create negated terms
-    mutate(word = ifelse(word_num %in% not_words_rows,paste0("not_",word),word))
+    filter(!(word_num %in% not_words_rows)) |> 
+    mutate(word = ifelse(word_num %in% (not_words_rows+1),paste0("not_",word),word)) |> 
+    select(-word_num)
   return(tokens)
 }
-
 
 
 only_top_words <- function(tokens, word_count = 1000) {
@@ -149,3 +155,31 @@ table(predicted_for_table)
 predicted_for_table <- tibble(actual = tweet_dfm_test$sentiment,predict(rf_fit,tweet_dfm_test))
 
 table(predicted_for_table)
+
+# ------------------------------------------------------
+# try it the sparse way
+# make recipe
+library(hardhat)
+sparse_bp <- default_recipe_blueprint(composition = "dgCMatrix")
+
+tweet_rec <-
+  recipe(sentiment ~ translatedText, data = tweet_train) %>%
+  step_tokenize(translatedText)  %>%
+  step_stopwords(translatedText,custom_stopword_source = my_stop_words) %>%
+  step_tokenfilter(translatedText, max_tokens = 1e2) %>%
+  step_tfidf(translatedText)
+
+cores <- parallel::detectCores()
+
+rf_model <- parsnip::rand_forest(trees = 100) %>% 
+  set_engine("ranger",num.threads = cores,importance = "impurity") %>% 
+  set_mode("classification")
+
+wf_rf_sparse <- 
+  workflow() |> 
+  add_recipe(tweet_rec,blueprint = sparse_bp) |> 
+  add_model(rf_model)
+
+rf_fit <- fit(wf_rf_sparse,tweet_train)
+
+summary(predict(rf_fit,tweet_train))
