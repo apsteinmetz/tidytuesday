@@ -17,14 +17,16 @@ Second, we want to explore using sparse data structures in the Tidy modeling fra
 library(tidyverse)
 library(tidytext)
 library(tidymodels)
-library(tm)
+library(textrecipes)
+# library(tm)
 library(tictoc)
 library(butcher)
-library(rayshader)
 library(yardstick)
 library(quanteda)
+library(hardhat)
 
-setwd("/2023-02-28_african_language")
+
+# setwd("/2023-02-28_african_language")
 load("data/afrisenti_translated.rdata")
 ```
 
@@ -50,7 +52,7 @@ tweet_test <- afrisenti_translated %>%
   filter(intended_use == "test") %>% 
   select(tweet_num,sentiment,lang,tweet)
 
-tweet_the_rest <- afrisenti_translated %>% 
+tweet_dev <- afrisenti_translated %>% 
   filter(intended_use == "dev") %>% 
   select(tweet_num,sentiment,lang,tweet)
 
@@ -91,12 +93,11 @@ Note that we don''t care what language the token is. It could be any language or
 
 We can do slightly better than just noting how often a word appears in a tweet by computed each word's tf-idf.  I'll let you look up the details of this but it is basically a measure of the word's uniqueness in the corpus.
 
-Also, I would like the language itself to be a feature.  Maybe the speakers of a certain language use Twitter just to complain.  To do this I'll add the language name as a word at the end of every tweet.
-
 ```{r}
 tweet_words_af <-tweet_train %>%
   select(tweet_num,lang,tweet) %>% 
-  mutate(tweet = paste(tweet,lang)) %>% 
+  # add language to every tweet if we can't bind a second dfm with just language
+  # mutate(tweet = paste(tweet,lang)) %>% 
   unnest_tokens(word, tweet) %>%
   count(tweet_num, lang, word) %>%
   bind_tf_idf(word, tweet_num, n)
@@ -127,13 +128,71 @@ sparse_tweet_af <- tweet_words_af %>%
 sparse_tweet_af
 ```
 
-how to add langauge as  feature
+
+Also, I would like the language itself to be a feature.  Maybe the speakers of a certain language use Twitter just to complain.  Let's make a DFM for just language.  We don't use TF-IDF, just whether the language is used, or not. 
 ```{r}
-convert(dfm_match(sparse_tweet_af,"docs"),to="data.frame") %>% 
-  rename(tweet_num = docs) %>% 
-  right_join(tweet_train) %>% 
-  select(tweet_num,lang) %>% 
-  cast_dfm()
+sparse_tweet_af <- tweet_words_af %>%
+  mutate(lang = as.character(lang)) %>% 
+  cast_dfm(tweet_num,lang,value=n) %>% 
+  cbind(sparse_tweet_af)
+
+sparse_tweet_af
 ```
 
+Now we have our feature matrix, ready to process.  It takes up mere megabytes rather than gigabytes for a non-sparse matrix.
+
+Set up the model
+```{r}
+
+```
+
+
+
+Now let's to this the tidymodels way
+```{r}
+# this sets up up to handle the  sparse DFM
+# I confess I'm just copy/pasting Julia's code without full understanding of the hardhat package
+sparse_bp <- default_recipe_blueprint(composition = "dgCMatrix")
+
+
+tweet_rec_af <-
+  recipe(sentiment ~ tweet, data = tweet_train) %>%
+  step_tokenize(tweet)  %>%
+  # this is flawed given that a stopword in any language is
+  # is considered a stop word in all languages
+  # but the filter and tfidf also address the stopword problem
+  # step_stopwords(tweet,custom_stopword_source = stopwords_af$stopword) %>%
+  # use top 10000 tokens. This may be too small given multiple languages
+  step_tokenfilter(tweet, max_tokens = 1e4) %>%
+  step_tfidf(tweet)
+
+```
+
+Set up a couple models to try.  Both are sparse-aware but not all parsnip models are
+```{r}
+lasso_spec <-
+  logistic_reg(penalty = 0.02, mixture = 1) %>%
+  set_engine("glmnet")
+
+xg_spec <-
+  boost_tree() %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+```
+
+
+Set up the workflow
+```{r}
+wf_sparse <- 
+  workflow() %>%
+  add_recipe(text_rec, blueprint = sparse_bp) %>%
+  add_model(xg_spec)
+```
+
+```{r}
+tweet_model_af <- fit(wf_sparse,tweet_train)
+tweet_pred_af <- predict(tweet_model_af,tweet_train)
+summary(tweet_test)
+summary(tweet_pred_af)
+```
 

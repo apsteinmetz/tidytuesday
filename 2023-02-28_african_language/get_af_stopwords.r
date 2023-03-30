@@ -10,10 +10,10 @@ read_stop <- function(fname){
   lang_iso <- str_extract(fname,"[a-z]{2}\\.txt$") %>% 
     str_remove("\\.txt")
   stop_words <- read_file(fname) %>% 
-    enframe(value="stopword") %>% 
-    separate_longer_delim("stopword","\n") %>% 
+    enframe(value="word") %>% 
+    separate_longer_delim("word","\n") %>% 
     mutate(lang_iso = lang_iso) %>% 
-    select(lang_iso,stopword)
+    select(lang_iso,word)
   return(stop_words)
 }
 
@@ -23,7 +23,7 @@ load(paste0(my_dir,"data/iso_lang.rdata"))
 
 stopwords_af <- left_join(stopwords_af,rename(iso_lang,lang_iso = '639-1')) %>% 
   rename(lang = `ISO language name`) %>% 
-  select(lang,stopword)
+  select(lang,word)
 
 save(stopwords_af,file = paste0(my_dir,"data/stopwords_af.rdata"))
 
