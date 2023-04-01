@@ -2,11 +2,14 @@
 library(tidyverse)
 library(tidytext)
 library(tidymodels)
+library(textrecipes)
 library(tm)
 library(vip)
 library(tictoc)
 library(butcher)
 library(yardstick)
+library(hardhat)
+library(Matrix)
 
 #setwd("2023-02-28_african_language")
 load("~/R Projects/tidytuesday/2023-02-28_african_language/data/stopwords_af.rdata")
@@ -37,8 +40,7 @@ tweet_dev <- afrisenti_translated %>%
 
 # add my stop words to defaults
 my_stop_words = tibble(word = c("http","https","dey","de","al","url","na","t.co","rt","user","users","wey","don",
-                                as.character(1:100),
-                               "?????????", "?????????","?????????"))
+                                as.character(1:100)))
                            
 
 full_stop_words <-  c(
@@ -108,7 +110,7 @@ tweet_tokens <- tweet_data %>%
 tweet_dfm_train <- make_dfm(tweet_train)
 tweet_dfm_test <- make_dfm(tweet_test)
 
-tweet_tokens_sparse <- cast_dfm(tweet_tokens,tweet_num,word,tf_idf)
+#tweet_tokens_sparse <- cast_dfm(tweet_tokens,tweet_num,word,tf_idf)
 
 
  # ---------------------------------------------------------
@@ -121,9 +123,7 @@ rf_mod <- parsnip::rand_forest(trees = 100) %>%
 
 
 rf_recipe <- 
-  recipe(sentiment ~ ., data = tweet_tokens_wide)
-
-
+  recipe(sentiment ~ ., data = tweet_dfm_train)
 
 rf_workflow <- 
   workflow() %>% 
@@ -141,10 +141,10 @@ translate(rf_mod)
 
 tic()
 rf_fit <- rf_workflow %>% 
-  fit(tweet_tokens_wide)
+  fit(tweet_dfm_train)
 toc()
 
-summary(predict(rf_fit,tweet_dfm_train))
+summary(predict(rf_fit,tweet_dfm_test))
 
 
 # Validation set assessment #1: looking at confusion matrix
@@ -166,7 +166,7 @@ tweet_rec <-
   recipe(sentiment ~ translatedText, data = tweet_train) %>%
   step_tokenize(translatedText)  %>%
   step_stopwords(translatedText,custom_stopword_source = my_stop_words) %>%
-  step_tokenfilter(translatedText, max_tokens = 1e2) %>%
+  step_tokenfilter(translatedText, max_tokens = 2e3) %>%
   step_tfidf(translatedText)
 
 cores <- parallel::detectCores()
@@ -175,11 +175,39 @@ rf_model <- parsnip::rand_forest(trees = 100) %>%
   set_engine("ranger",num.threads = cores,importance = "impurity") %>% 
   set_mode("classification")
 
-wf_rf_sparse <- 
+xg_model <- parsnip::boost_tree(trees = 100,tree_depth = 50) %>% 
+  set_engine("xgboost",nthread = cores,verbose = 0) %>% 
+  set_mode("classification")
+
+wf_xg_sparse <- 
   workflow() |> 
   add_recipe(tweet_rec,blueprint = sparse_bp) |> 
-  add_model(rf_model)
+  add_model(xg_model)
 
-rf_fit <- fit(wf_rf_sparse,tweet_train)
+# wf_rf_sparse <- 
+#   workflow() |> 
+#   add_recipe(tweet_rec,blueprint = sparse_bp) |> 
+#   add_model(rf_model)
 
-summary(predict(rf_fit,tweet_train))
+# wf_rf_fat <- 
+#   workflow() |> 
+#   add_recipe(tweet_rec) |> 
+#   #  add_recipe(tweet_rec,blueprint = sparse_bp) |> 
+#   add_model(rf_model)
+
+# tic()
+# rf_fit <- fit(wf_rf_sparse,tweet_train)
+# toc()
+
+tic()
+xg_fit <- fit(wf_xg_sparse,tweet_train)
+toc()
+
+xg_fit
+
+# summary(predict(rf_fit,tweet_train))
+summary(predict(xg_fit,tweet_train))
+
+
+
+
