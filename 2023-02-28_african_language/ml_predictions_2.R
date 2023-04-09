@@ -13,18 +13,22 @@ library(Matrix)
 
 #setwd("2023-02-28_african_language")
 load("~/R Projects/tidytuesday/2023-02-28_african_language/data/stopwords_af.rdata")
-load("data/afrisenti_translated.rdata")
+load("~/R Projects/tidytuesday/2023-02-28_african_language/data/afrisenti_translated.rdata")
+
 
 
 # ----- SETUP ------------------------------
 afrisenti_translated <- afrisenti_translated %>%
   mutate(lang = as.factor(assigned_long)) %>%
-  mutate(sentiment = as.factor(label))
+  # make binary
+  filter(label != "neutral") %>% 
+  mutate(sentiment = as.factor(as.character(label)))
 
 # make negation tokens
 afrisenti_translated <- afrisenti_translated %>%
   mutate(tweet = str_replace(tweet, "not ","not_")) %>%
   mutate(translatedText = str_replace(translatedText, "not ","not_"))
+
 
 tweet_train <- afrisenti_translated %>% 
   filter(intended_use == "train") %>% 
@@ -43,11 +47,23 @@ my_stop_words = tibble(word = c("http","https","dey","de","al","url","na","t.co"
                                 as.character(1:100)))
                            
 
+# make a stopword list of any 1-character words
+# this is a somewhat arbitrary rubric for african language stopwords
+stop_words_1char <- afrisenti_translated %>% 
+  unnest_tokens(word,tweet) %>% 
+  select(word) %>% 
+  filter(str_length(word)<2) %>% 
+  unique()
+
 full_stop_words <-  c(
   stop_words$word,
   my_stop_words$word,
-  stopwords_af$word
+  stopwords_af$word,
+  stop_words_1char$word
 )
+
+# -------------------------------------------
+# non-tidymodel preproccessing functions
 
 # turn words preceded by "not" into "not_<word>"
 # to create a negated token
@@ -107,13 +123,12 @@ tweet_tokens <- tweet_data %>%
 }
 
 
-tweet_dfm_train <- make_dfm(tweet_train)
-tweet_dfm_test <- make_dfm(tweet_test)
+# tweet_dfm_train <- make_dfm(tweet_train)
+# tweet_dfm_test <- make_dfm(tweet_test)
 
 #tweet_tokens_sparse <- cast_dfm(tweet_tokens,tweet_num,word,tf_idf)
 
-
- # ---------------------------------------------------------
+# -------------------------------------------
 # run the models
 
 cores <- parallel::detectCores()
@@ -159,35 +174,56 @@ table(predicted_for_table)
 # ------------------------------------------------------
 # try it the sparse way
 # make recipe
-library(hardhat)
 sparse_bp <- default_recipe_blueprint(composition = "dgCMatrix")
 
-tweet_rec <-
+tweet_rec_eng <-
   recipe(sentiment ~ translatedText, data = tweet_train) %>%
   step_tokenize(translatedText)  %>%
-  step_stopwords(translatedText,custom_stopword_source = my_stop_words) %>%
+  step_stopwords(translatedText,custom_stopword_source = full_stop_words) %>%
   step_tokenfilter(translatedText, max_tokens = 2e3) %>%
   step_tfidf(translatedText)
 
-cores <- parallel::detectCores()
+tweet_rec_af <-
+  recipe(sentiment ~ tweet, data = tweet_train) %>%
+  step_tokenize(tweet)  %>%
+  step_stopwords(tweet,custom_stopword_source = full_stop_words) %>%
+  step_tokenfilter(tweet, max_tokens = 2e3) %>%
+  step_tfidf(tweet)
 
-rf_model <- parsnip::rand_forest(trees = 100) %>% 
-  set_engine("ranger",num.threads = cores,importance = "impurity") %>% 
-  set_mode("classification")
+# cores <- parallel::detectCores()
 
-xg_model <- parsnip::boost_tree(trees = 100,tree_depth = 50) %>% 
-  set_engine("xgboost",nthread = cores,verbose = 0) %>% 
-  set_mode("classification")
+# rf_model <- parsnip::rand_forest(trees = 100) %>% 
+#   set_engine("ranger",num.threads = cores,importance = "impurity") %>% 
+#   set_mode("classification")
+# 
+# xg_model <- parsnip::boost_tree(trees = 100,tree_depth = 50) %>% 
+#   set_engine("xgboost",nthread = cores,verbose = 0) %>% 
+#   set_mode("classification")
+# 
+lasso_model <-
+  logistic_reg(penalty = 0.02, mixture = 1) %>%
+  set_engine("glmnet") %>%
+  set_args(family = "binomial")
 
-wf_xg_sparse <- 
-  workflow() |> 
-  add_recipe(tweet_rec,blueprint = sparse_bp) |> 
-  add_model(xg_model)
-
-# wf_rf_sparse <- 
+# wf_xg_sparse <- 
 #   workflow() |> 
 #   add_recipe(tweet_rec,blueprint = sparse_bp) |> 
-#   add_model(rf_model)
+#   add_model(xg_model)
+# 
+# wf_rf_sparse <- 
+#    workflow() |> 
+#    add_recipe(tweet_rec,blueprint = sparse_bp) |> 
+#    add_model(rf_model)
+
+wf_lasso_eng <- 
+  workflow() |> 
+  add_recipe(tweet_rec_eng,blueprint = sparse_bp) |> 
+  add_model(lasso_model)
+
+wf_lasso_af <- 
+  workflow() |> 
+  add_recipe(tweet_rec_af,blueprint = sparse_bp) |> 
+  add_model(lasso_model)
 
 # wf_rf_fat <- 
 #   workflow() |> 
@@ -199,15 +235,37 @@ wf_xg_sparse <-
 # rf_fit <- fit(wf_rf_sparse,tweet_train)
 # toc()
 
+# tic()
+# xg_fit <- fit(wf_xg_sparse,tweet_train)
+# toc()
+# 
+# xg_fit
+# 
+# # summary(predict(rf_fit,tweet_train))
+# summary(predict(xg_fit,tweet_train))
+
 tic()
-xg_fit <- fit(wf_xg_sparse,tweet_train)
+lasso_fit_eng <- fit(wf_lasso_eng,tweet_train)
 toc()
 
-xg_fit
+# use native languages
+# summary(predict(rf_fit,tweet_train))
+actual <- tweet_test$sentiment
+predicted <- predict(lasso_fit_eng,tweet_test,type = "class")$.pred_class
+
+tab <- table(actual,predicted)
+tab
+confusionMatrix(tab)
+
+tic()
+lasso_fit_af <- fit(wf_lasso_af,tweet_train)
+toc()
 
 # summary(predict(rf_fit,tweet_train))
-summary(predict(xg_fit,tweet_train))
+actual <- tweet_test$sentiment
+predicted <- predict(lasso_fit_af,tweet_test,type = "class")$.pred_class
 
-
-
+tab <- table(actual,predicted)
+tab
+confusionMatrix(tab)
 

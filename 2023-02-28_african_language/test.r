@@ -12,36 +12,44 @@ data("small_fine_foods")
 
 # traditional
 
-reviews_train <- training_data %>%
+dfm_train <- training_data %>%
   unnest_tokens(word, review) %>%
   count(product, word) %>%
+  anti_join(stop_words) %>% 
   bind_tf_idf(word, product, n) %>% 
-  cast_dfm(product, word, n)
+  cast_dfm(product, word, tf_idf)
 
 
-docvars(reviews_train,"score") <-training_data$score
+docvars(dfm_train,"score") <-training_data$score
 
-reviews_test <- testing_data %>%
+dfm_test <- testing_data %>%
   unnest_tokens(word, review) %>%
   count(product, word) %>%
+  anti_join(stop_words) %>% 
   bind_tf_idf(word, product, n) %>% 
-  cast_dfm(product, word, n)
+  cast_dfm(product, word, tf_idf)
 
 
-docvars(reviews_test,"score") <-testing_data$score
+docvars(dfm_test,"score") <-testing_data$score
 
 # match all features in training set so they appear in test set
 # note any new features are empty so no data leakage
-reviews_test <- dfm_match(reviews_test, 
-                                  features = featnames(reviews_train))
+dfm_test <- dfm_match(dfm_test, 
+                                  features = featnames(dfm_train))
 
 
 
-rf <- ranger::ranger(y=reviews_train$score, x = reviews_train, 
+rf <- ranger::ranger(y=dfm_train$score, x = dfm_train, 
                      classification = TRUE)
 
-lasso <- cv.glmnet(x = reviews_train,
-                   y = reviews_train$score,
+actual <- dfm_test$score
+predicted <- predict(rf,dfm_test,type = "response")
+tab <- table(actual,predicted$predictions)
+tab
+confusionMatrix(tab)
+
+lasso <- cv.glmnet(x = dfm_train,
+                   y = dfm_train$score,
                    alpha = 1,
                    nfold = 5,
                    family = "binomial")
@@ -50,8 +58,8 @@ index_best <- which(lasso$lambda == lasso$lambda.min)
 beta <- lasso$glmnet.fit$beta[, index_best]
 head(sort(beta, decreasing = TRUE), 20)
 
-actual <- reviews_test$score
-predicted <- predict(lasso,reviews_test,type = "response")
+actual <- dfm_test$score
+predicted <- predict(lasso,dfm_test,type = "class")
 tab <- table(actual,predicted)
 tab
 confusionMatrix(tab)
@@ -98,6 +106,16 @@ fit_rf <- fit(rf_wf,training_data)
 fit_las <- fit(las_wf,training_data)
 
 
-summary(predict(fit_xg,training_data))
-summary(predict(fit_las,training_data))
-summary(predict(fit_rf,training_data))
+summary(predict(fit_xg,testing_data))
+summary(predict(fit_las,testing_data))
+summary(predict.ranger(fit_rf,testing_data))
+
+index_best <- which(fit_las$fit$fit$fit$lambda == min(fit_las$fit$fit$fit$lambda))
+beta <- fit_las$glmnet.fit$beta[, index_best]
+head(sort(beta, decreasing = TRUE), 20)
+
+actual <- testing_data$score
+predicted <- predict(fit_las,testing_data)
+tab <- table(actual,predicted$.pred_class)
+tab
+confusionMatrix(tab)
