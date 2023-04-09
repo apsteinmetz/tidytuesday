@@ -4,9 +4,60 @@ library(tidytext)
 library(textrecipes)
 library(stopwords)
 library(hardhat)
+library(quanteda)
+library(caret)
+library(glmnet)
 
 data("small_fine_foods")
 
+# traditional
+
+reviews_train <- training_data %>%
+  unnest_tokens(word, review) %>%
+  count(product, word) %>%
+  bind_tf_idf(word, product, n) %>% 
+  cast_dfm(product, word, n)
+
+
+docvars(reviews_train,"score") <-training_data$score
+
+reviews_test <- testing_data %>%
+  unnest_tokens(word, review) %>%
+  count(product, word) %>%
+  bind_tf_idf(word, product, n) %>% 
+  cast_dfm(product, word, n)
+
+
+docvars(reviews_test,"score") <-testing_data$score
+
+# match all features in training set so they appear in test set
+# note any new features are empty so no data leakage
+reviews_test <- dfm_match(reviews_test, 
+                                  features = featnames(reviews_train))
+
+
+
+rf <- ranger::ranger(y=reviews_train$score, x = reviews_train, 
+                     classification = TRUE)
+
+lasso <- cv.glmnet(x = reviews_train,
+                   y = reviews_train$score,
+                   alpha = 1,
+                   nfold = 5,
+                   family = "binomial")
+
+index_best <- which(lasso$lambda == lasso$lambda.min)
+beta <- lasso$glmnet.fit$beta[, index_best]
+head(sort(beta, decreasing = TRUE), 20)
+
+actual <- reviews_test$score
+predicted <- predict(lasso,reviews_test,type = "response")
+tab <- table(actual,predicted)
+tab
+confusionMatrix(tab)
+
+# -------------------------------------------------
+# tidymodels
 sparse_bp <- default_recipe_blueprint(composition = "dgCMatrix")
 
 text_rec <-
