@@ -19,7 +19,7 @@ googleLanguageR::gl_translate(tweet)
 
 # batch up requests
 # this cost about $15. About 10% of the tweets are already in English though
-plan(multicore,workers = 4)
+plan(multicore)
 payload_size = 100
 tic()
 afrisenti_translated <- seq(0,nrow(afrisenti),by = payload_size) %>% 

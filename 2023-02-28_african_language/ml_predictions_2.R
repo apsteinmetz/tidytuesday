@@ -48,7 +48,7 @@ my_stop_words = tibble(word = c("http","https","dey","de","al","url","na","t.co"
                            
 
 # make a stopword list of any 1-character words
-# this is a somewhat arbitrary rubric for african language stopwords
+# this is a somewhat arbitrary rubric for African language stop words
 stop_words_1char <- afrisenti_translated %>% 
   unnest_tokens(word,tweet) %>% 
   select(word) %>% 

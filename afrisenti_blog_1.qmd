@@ -1,0 +1,94 @@
+---
+title: "Sentiment Analysis Using Google Translate"
+author: "Art Steinmetz"
+format: html
+editor: visual
+bibliography: references.bib
+---
+
+## Inspired by TidyTuesday
+
+Some of the the R data science community participate in a weekly challenge called "Tidy Tuesday," where an interesting data set is presented for analysis but mostly visualization. There are some tremendous examples of beautiful work posted on [Twitter](twitter.com) with the hashtag #tidytuesday.
+
+## African Tweets and Sentiment
+
+Recently, the weekly dataset was a collection of over 100,000 tweets, apparently from 2022, in 14 African languages, with sentiment labels. The paper describing the set and methods is [here](https://arxiv.org/pdf/2302.08956.pdf) [@muhammad-etal-2023-semeval]. The TidyTuesday project and raw data are [here](https://github.com/rfordatascience/tidytuesday/blob/master/data/2023/2023-02-28/readme.md). This is quite a diverse data set including many tweets in English, tweets in languages which, like English, use the Latin character set and tweets in other character sets, including Arabic.
+
+I saw this as an avenue to ask a couple interesting questions.
+
+1.  Can we apply sentiment analysis techniques to a translated version of this dataset? How good is Google Translate, anyway?
+2.  Over the past year there has been much talk about the differences in attitudes of the "global north" vs. the "global south." Does this data set reveal anything about that?
+
+I saw an opportunity to sharpen my skills in a couple areas, using the Google API for batch translation and using RStudio's Tidytext and Tidymodels toolsets.
+
+I split these explorations into three posts.
+
+1.  In this post we translate the data and use the Tidytext framework to do sentiment analysis with word valences.
+2.  Next, we'll compare machine learning approaches in the TidyModels framework to do sentiment analysis in both the native and translated tweets.
+3.  Finally, let's use the already assigned sentiment tags to explore African attitudes to the "global north."
+
+::: callout-caution
+## Disclaimer
+
+The usual caveats apply. I am not a social scientist. I am a hobbyist. This is an exercise in R coding so I make no claim that my conclusions about any of this data are valid.
+:::
+
+## Get the Data
+
+Here are the packages we'll need for this project.
+
+```{r}
+library(tidyverse)
+library(googleLanguageR)
+library(future)
+library(furrr)
+```
+
+The TidyTuesday github repo has the Afrisenti dataset with all the languages combined. Let's load it.
+
+```{r}
+afrisenti <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-28/afrisenti.csv',
+                             show_col_types = FALSE)
+```
+
+## Translate the Tweets
+
+To use Google translate in batch mode we'll need an API key. I dont' get Google. For some of their services, like Maps, a single API key is needed. For Translate we need a JSON file with the key. Once you get the key, store the file name in your .Renviron file with the key name "GL_AUTH"
+
+::: callout-note
+Getting the Google Language API key is a complicated procedure and I won't detail it here but you can find complete instructions in the [googlelanguageR package introduction](https://cran.r-project.org/web/packages/googleLanguageR/vignettes/setup.html).
+:::
+
+Once once your key is created you can start translating with R. This isn't free. Translating over 100,000 tweet cost me about US\$15. A couple bucks was wasted because I submitted all the tweets including those in English. You might choose to filter English tweets out first.
+
+I first tried shooting the whole data set into the translation routine but Google protested that I was sending too much. I divided the set into batches of 100 tweets at a time which fixed the probem.
+
+We can speed things up using the `furrr` and `future` packages to allow parallel processing using just three lines of code.  `furrr` adapts the `purr` `map` functions to allow parallel execution.  Amazing!
+
+```{r}
+#| eval: false
+gl_auto_auth()
+future::plan(multicore) # will use all available cores
+payload_size = min(100,nrow(afrisenti))
+afrisenti_translated <- seq(0,nrow(afrisenti)-payload_size,
+                            by = payload_size) |> 
+  furrr::future_map_dfr(\(x) {gl_translate(afrisenti$tweet[(x+1):(x+payload_size)])},
+      .progress = TRUE)
+future::plan(sequential) # back to normal
+```
+
+
+```{r}
+afrisenti_translated <- afrisenti_translated |> 
+  na.omit() |> 
+  select(-text) |> 
+  bind_cols(afrisenti) |> 
+  rowid_to_column(var = "tweet_num") |> 
+  mutate(tweet_num = as.numeric(tweet_num))
+  mutate(intended_use = as_factor(intended_use)) |>
+  mutate(detectedSourceLanguage = as_factor(detectedSourceLanguage)) |>
+  mutate(language_iso_code = as_factor(language_iso_code)) |>
+  mutate(label = as.factor(label))
+
+```
+
